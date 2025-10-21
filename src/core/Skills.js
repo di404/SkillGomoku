@@ -1,0 +1,143 @@
+// 简易技能系统：定义若干技能并管理冷却与释放
+
+class Skill {
+  constructor({ id, name, description, cooldown, use }) {
+    this.id = id;
+    this.name = name;
+    this.description = description;
+    this.cooldown = cooldown; // turns
+    this.remaining = 0; // turns remaining on cooldown
+    this.use = use; // async or sync function(ctx)
+  }
+
+  canUse() {
+    return this.remaining <= 0;
+  }
+
+  tick() {
+    if (this.remaining > 0) this.remaining -= 1;
+  }
+}
+
+export default class SkillsManager {
+  constructor(scene, board) {
+    this.scene = scene;
+    this.board = board;
+
+    // 定义四种新技能
+    this.skills = [
+      new Skill({
+        id: 'flying-sand',
+        name: '飞沙走石',
+        description: '随机移动对方的一颗棋子到附近空位。',
+        cooldown: 4,
+        use: async (ctx) => {
+          // 找出对方所有棋子
+          const opponent = ctx.currentPlayer === 1 ? 2 : 1;
+          const pieces = [];
+          for (let y = 0; y < this.board.size; y++) {
+            for (let x = 0; x < this.board.size; x++) {
+              if (this.board.grid[y][x] === opponent) pieces.push({ x, y });
+            }
+          }
+          if (pieces.length === 0) return;
+
+          // 随机选一颗
+          const piece = pieces[Math.floor(Math.random() * pieces.length)];
+          
+          // 找附近空位（曼哈顿距离 <= 3）
+          const candidates = [];
+          for (let dy = -3; dy <= 3; dy++) {
+            for (let dx = -3; dx <= 3; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              const nx = piece.x + dx, ny = piece.y + dy;
+              if (this.board.isEmpty(nx, ny)) candidates.push({ x: nx, y: ny });
+            }
+          }
+          if (candidates.length === 0) return;
+
+          const target = candidates[Math.floor(Math.random() * candidates.length)];
+          // 移动棋子
+          this.board.grid[piece.y][piece.x] = 0;
+          this.board.grid[target.y][target.x] = opponent;
+          ctx.redrawStones();
+        },
+      }),
+      new Skill({
+        id: 'mountain-power',
+        name: '力拔山兮',
+        description: '移除对方任意两颗棋子。',
+        cooldown: 5,
+        use: async (ctx) => {
+          // 检查对方是否有至少两颗棋子
+          const opponent = ctx.currentPlayer === 1 ? 2 : 1;
+          let count = 0;
+          for (let y = 0; y < this.board.size; y++) {
+            for (let x = 0; x < this.board.size; x++) {
+              if (this.board.grid[y][x] === opponent) count++;
+              if (count >= 2) break;
+            }
+            if (count >= 2) break;
+          }
+          if (count < 2) {
+            return { ok: false, message: '对方棋子不足两颗' };
+          }
+          ctx.flags.awaitingRemovalCount = 2; // 需要点击两次对方棋子
+        },
+      }),
+      new Skill({
+        id: 'still-water',
+        name: '静如止水',
+        description: '跳过对方下一回合（对方无法落子一次）。',
+        cooldown: 6,
+        use: async (ctx) => {
+          // 标记对方下一回合被跳过
+          const nextPlayer = ctx.currentPlayer === 1 ? 2 : 1;
+          if (!ctx.skipNextTurn) ctx.skipNextTurn = {};
+          ctx.skipNextTurn[nextPlayer] = true;
+        },
+      }),
+      new Skill({
+        id: 'polarity-reverse',
+        name: '两极反转',
+        description: '交换场上所有黑白棋子的颜色。',
+        cooldown: 7,
+        use: async (ctx) => {
+          // 遍历棋盘，1 变 2，2 变 1
+          for (let y = 0; y < this.board.size; y++) {
+            for (let x = 0; x < this.board.size; x++) {
+              if (this.board.grid[y][x] === 1) this.board.grid[y][x] = 2;
+              else if (this.board.grid[y][x] === 2) this.board.grid[y][x] = 1;
+            }
+          }
+          ctx.redrawStones();
+        },
+      }),
+    ];
+  }
+
+  list() {
+    return this.skills;
+  }
+
+  getById(id) {
+    return this.skills.find(s => s.id === id);
+  }
+
+  tickAll() {
+    this.skills.forEach(s => s.tick());
+  }
+
+  async activate(id, ctx) {
+    const s = this.getById(id);
+    if (!s) return { ok: false, message: '技能不存在' };
+    if (!s.canUse()) return { ok: false, message: '冷却中' };
+
+    const result = await s.use(ctx);
+    // 如果技能返回了失败结果，不触发冷却
+    if (result && !result.ok) return result;
+    
+    s.remaining = s.cooldown;
+    return { ok: true };
+  }
+}

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skill Gomoku · Phaser + Firebase</title>
+    <meta name="description" content="五子棋 + 技能 的 Phaser 小游戏骨架，准备部署到 Firebase Hosting。" />
+    <!-- Phaser CDN（固定稳定版本） -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <style>
+      :root {
+        --sidebar-width: 320px;
+        --bg: #0f1021;
+        --panel: #161729;
+        --panel-2: #1e2040;
+        --text: #eaeaf7;
+        --muted: #a8adcf;
+        --accent: #5b8cff;
+      }
+      html, body {
+        height: 100%;
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+      }
+      .layout {
+        height: 100vh;
+        width: 100vw;
+        display: flex;
+        flex-direction: row;
+        gap: 12px;
+        box-sizing: border-box;
+        padding: 12px;
+      }
+      .game-wrap {
+        flex: 0 0 auto;
+        /* 左侧为正方形区域，优先使用视口高度，再预留右侧边栏空间 */
+        width: min(100vh - 24px, calc(100vw - var(--sidebar-width) - 36px));
+        height: min(100vh - 24px, calc(100vw - var(--sidebar-width) - 36px));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(180deg, #0b0c1e, #0d0f26);
+        border: 1px solid #23244a;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      #game-container {
+        width: 100%;
+        height: 100%;
+      }
+      .side-panel {
+        flex: 0 0 var(--sidebar-width);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid #23244a;
+        border-radius: 10px;
+        padding: 12px;
+      }
+      .title {
+        font-weight: 700;
+        font-size: 18px;
+        margin-bottom: 4px;
+      }
+      .muted { color: var(--muted); font-size: 12px; }
+      .status-line { display: flex; justify-content: space-between; margin-top: 6px; }
+      .skills { display: flex; flex-direction: column; gap: 8px; }
+      .skill-btn {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 12px;
+        background: var(--panel-2);
+        border: 1px solid #2b2d58;
+        border-radius: 8px;
+        cursor: pointer;
+        user-select: none;
+        transition: background .12s, transform .02s;
+        position: relative;
+      }
+      .skill-btn:hover { background: #262a5a; }
+      .skill-btn:active { transform: translateY(1px); }
+      .skill-btn::after {
+        content: attr(data-desc);
+        position: absolute;
+        bottom: calc(100% + 8px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.92);
+        color: #ffd666;
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .2s;
+        z-index: 100;
+      }
+      .skill-btn:hover::after { opacity: 1; }
+      .skill-name { font-size: 14px; }
+      .skill-cd { font-size: 12px; color: var(--muted); }
+      .skill-disabled { opacity: 0.55; pointer-events: none; }
+      .toast { color: #ffd666; min-height: 20px; }
+      .restart-btn {
+        width: 100%;
+        padding: 12px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: none;
+        border-radius: 8px;
+        color: white;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform .12s, box-shadow .12s;
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+      }
+      .restart-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+      }
+      .restart-btn:active { transform: translateY(0); }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <div class="game-wrap">
+        <div id="game-container"></div>
+      </div>
+      <div class="side-panel">
+        <div class="card">
+          <div class="title">Skill Gomoku</div>
+          <div class="muted">五子棋 + 技能</div>
+          <div class="status-line"><span>状态</span><span id="status">Loading…</span></div>
+          <div class="status-line"><span>当前玩家</span><span id="currPlayer">-</span></div>
+          <div class="status-line"><span>回合</span><span id="turn">-</span></div>
+        </div>
+        <div class="card">
+          <div class="title">技能</div>
+          <div class="skills">
+            <div class="skill-btn" id="skill-flying" data-desc="随机移动对方的一颗棋子到附近空位">
+              <div class="skill-name">飞沙走石</div>
+              <div class="skill-cd" data-cd>CD</div>
+            </div>
+            <div class="skill-btn" id="skill-mountain" data-desc="移除对方任意两颗棋子">
+              <div class="skill-name">力拔山兮</div>
+              <div class="skill-cd" data-cd>CD</div>
+            </div>
+            <div class="skill-btn" id="skill-water" data-desc="跳过对方下一回合">
+              <div class="skill-name">静如止水</div>
+              <div class="skill-cd" data-cd>CD</div>
+            </div>
+            <div class="skill-btn" id="skill-polarity" data-desc="交换场上所有黑白棋子的颜色">
+              <div class="skill-name">两极反转</div>
+              <div class="skill-cd" data-cd>CD</div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="title">提示</div>
+          <div class="toast" id="toast"></div>
+        </div>
+        <div class="card">
+          <div class="title">说明</div>
+          <div class="muted" style="line-height: 1.6;">
+            • 五子连珠获胜<br>
+            • 技能有冷却时间<br>
+            • 悬停技能查看说明<br>
+            • 力拔山兮需点击两次
+          </div>
+        </div>
+        <div class="card">
+          <button class="restart-btn" id="restart-btn">🔄 重新开始</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 入口脚本（使用 ES Modules 组织代码） -->
+    <script type="module" src="./src/main.js"></script>
+  </body>
+  </html>
