@@ -178,6 +178,19 @@ export default class GameScene extends Phaser.Scene {
     const { x, y } = this.worldToBoard(pointer.x, pointer.y);
     if (!this.board.inBounds(x, y)) return;
 
+    // 如果正在选择清扫方向，阻止其他操作
+    if (this.flags.choosingCleanSweepDirection) {
+      return;
+    }
+
+    // 技能：保洁上门 - 等待点击位置选择方向
+    if (this.flags.awaitingCleanSweep) {
+      this.flags.awaitingCleanSweep = false;
+      this.flags.choosingCleanSweepDirection = true; // 标记正在选择方向
+      this.showDirectionMenu(x, y);
+      return;
+    }
+
     // 技能：力拔山兮 - 等待点击格子破坏
     if (this.flags.awaitingDestroy) {
       if (!this.board.isDestroyed(x, y)) {
@@ -352,6 +365,7 @@ export default class GameScene extends Phaser.Scene {
       'tiger-trap': () => this.effectTigerTrap(),
       'water-drop': () => this.effectWaterDrop(),
       'resurrection': () => this.effectResurrection(),
+      'clean-sweep': () => this.effectCleanSweep(),
     };
     const fn = effects[skillId];
     if (fn) fn();
@@ -377,6 +391,8 @@ export default class GameScene extends Phaser.Scene {
       'tiger-trap': { freq: 200, type: 'sawtooth', duration: 0.4 },
       'water-drop': { freq: 800, type: 'sine', duration: 0.5 },
       'resurrection': { freq: 500, type: 'triangle', duration: 0.6 },
+      'clean-sweep': { freq: 700, type: 'sine', duration: 0.5 },
+      'sweep': { freq: 650, type: 'sine', duration: 0.2 },
     };
     
     const sound = sounds[skillId] || { freq: 440, type: 'sine', duration: 0.3 };
@@ -400,6 +416,7 @@ export default class GameScene extends Phaser.Scene {
       'tiger-trap': '调虎离山',
       'water-drop': '水滴石穿',
       'resurrection': '东山再起',
+      'clean-sweep': '保洁上门',
     };
     
     const name = names[skillId];
@@ -583,8 +600,47 @@ export default class GameScene extends Phaser.Scene {
         alpha: 0,
         duration: 1000 + Math.random() * 500,
         delay: i * 30,
-        ease: 'Sine.easeOut',
+        ease: 'Cubic.easeOut',
         onComplete: () => particle.destroy(),
+      });
+    }
+  }
+
+  effectCleanSweep() {
+    // 保洁上门：清洁波纹扩散
+    const cx = this.scale.width / 2;
+    const cy = this.scale.height / 2;
+    
+    // 蓝色清洁波纹
+    for (let i = 0; i < 5; i++) {
+      const wave = this.add.circle(cx, cy, 10, 0x4facfe, 0.6);
+      wave.setStrokeStyle(3, 0xffffff, 0.8);
+      this.effectsLayer.add(wave);
+      this.tweens.add({
+        targets: wave,
+        radius: 200 + i * 50,
+        alpha: 0,
+        duration: 800,
+        delay: i * 100,
+        ease: 'Quad.easeOut',
+        onComplete: () => wave.destroy(),
+      });
+    }
+    
+    // 闪光星星
+    for (let i = 0; i < 20; i++) {
+      const x = cx + (Math.random() - 0.5) * 400;
+      const y = cy + (Math.random() - 0.5) * 400;
+      const star = this.add.star(x, y, 4, 3, 6, 0xffffff, 0.9);
+      this.effectsLayer.add(star);
+      this.tweens.add({
+        targets: star,
+        scale: 1.5,
+        alpha: 0,
+        duration: 600,
+        delay: i * 40,
+        ease: 'Back.easeOut',
+        onComplete: () => star.destroy(),
       });
     }
   }
@@ -786,6 +842,247 @@ export default class GameScene extends Phaser.Scene {
     
     // 屏幕闪光（仅闪烁，不淡入）
     this.cameras.main.flash(600, 255, 255, 255);
+  }
+
+  showDirectionMenu(x, y) {
+    // 在选定位置周围显示方向按钮
+    const p = this.boardToWorld(x, y);
+    const btnRadius = 18; // 按钮半径缩小
+    const offset = this.cell; // 正好一格的距离
+    
+    // 先在选定位置显示标记虚影
+    const marker = this.add.circle(p.x, p.y, this.cell * 0.4, 0x4facfe, 0.4);
+    marker.setStrokeStyle(3, 0xffd666, 0.8);
+    this.effectsLayer.add(marker);
+    
+    // 脉动效果
+    this.tweens.add({
+      targets: marker,
+      alpha: 0.6,
+      scale: 1.1,
+      duration: 400,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+    
+    // 四个方向：上(纵向)，右(横向)，右下(斜向\)，右上(斜向/)
+    const directions = [
+      { dir: 'vertical', dx: 0, dy: -offset, lineType: 'vertical' },
+      { dir: 'horizontal', dx: offset, dy: 0, lineType: 'horizontal' },
+      { dir: 'diagonal2', dx: offset * 0.707, dy: -offset * 0.707, lineType: 'diagonal2' },
+      { dir: 'diagonal1', dx: offset * 0.707, dy: offset * 0.707, lineType: 'diagonal1' },
+    ];
+    
+    const buttons = [];
+    const previewLayer = this.add.layer(); // 预览特效层
+    this.effectsLayer.add(previewLayer);
+    
+    directions.forEach((d) => {
+      const btnX = p.x + d.dx;
+      const btnY = p.y + d.dy;
+      
+      const btn = this.add.circle(btnX, btnY, btnRadius, 0x16213e, 0.95).setInteractive();
+      btn.setStrokeStyle(2, 0x0f4c75, 1);
+      this.effectsLayer.add(btn);
+      
+      // 在按钮内绘制方向线段（在按钮之后添加，确保在上层）
+      const lineGraphics = this.add.graphics();
+      const lineLength = btnRadius * 0.618;
+      lineGraphics.lineStyle(3, 0xffffff, 1);
+      
+      if (d.lineType === 'vertical') {
+        // 竖线
+        lineGraphics.lineBetween(btnX, btnY - lineLength, btnX, btnY + lineLength);
+      } else if (d.lineType === 'horizontal') {
+        // 横线
+        lineGraphics.lineBetween(btnX - lineLength, btnY, btnX + lineLength, btnY);
+      } else if (d.lineType === 'diagonal1') {
+        // 斜线 \ (45度)
+        const offset45 = lineLength * 0.707;
+        lineGraphics.lineBetween(btnX - offset45, btnY - offset45, btnX + offset45, btnY + offset45);
+      } else if (d.lineType === 'diagonal2') {
+        // 斜线 / (45度)
+        const offset45 = lineLength * 0.707;
+        lineGraphics.lineBetween(btnX - offset45, btnY + offset45, btnX + offset45, btnY - offset45);
+      }
+      
+      this.effectsLayer.add(lineGraphics);
+      
+      // 鼠标悬停时显示预览和高亮按钮
+      btn.on('pointerover', () => {
+        btn.setFillStyle(0x0f4c75, 1);
+        btn.setStrokeStyle(3, 0xffd666, 1);
+        this.showSweepPreview(x, y, d.dir, previewLayer);
+      });
+      
+      // 鼠标移出时清除预览和恢复按钮
+      btn.on('pointerout', () => {
+        btn.setFillStyle(0x16213e, 0.95);
+        btn.setStrokeStyle(2, 0x0f4c75, 1);
+        this.clearSweepPreview(previewLayer);
+      });
+      
+      // 点击时执行清扫
+      btn.on('pointerdown', () => {
+        // 清除菜单和预览
+        buttons.forEach(b => {
+          b.btn.destroy();
+          b.line.destroy();
+        });
+        marker.destroy();
+        previewLayer.destroy();
+        
+        // 清除选择方向标记
+        delete this.flags.choosingCleanSweepDirection;
+        
+        // 执行清扫
+        this.executeSweep(x, y, d.dir);
+      });
+      
+      buttons.push({ btn, line: lineGraphics });
+    });
+    
+    // 存储菜单元素以便清理
+    this.currentDirectionMenu = { buttons, marker, previewLayer };
+  }
+  
+  showSweepPreview(x, y, direction, previewLayer) {
+    // 清除之前的预览
+    this.clearSweepPreview(previewLayer);
+    
+    // 获取将要被清除的位置
+    const positions = this.getSweepPositions(x, y, direction);
+    
+    // 为每个位置显示虚影特效
+    positions.forEach(pos => {
+      const p = this.boardToWorld(pos.x, pos.y);
+      
+      // 半透明红色圆圈
+      const preview = this.add.circle(p.x, p.y, this.cell * 0.4, 0xff6b6b, 0.3);
+      preview.setStrokeStyle(2, 0xff4444, 0.6);
+      previewLayer.add(preview);
+      
+      // 脉动效果
+      this.tweens.add({
+        targets: preview,
+        alpha: 0.5,
+        scale: 1.1,
+        duration: 400,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+    });
+  }
+  
+  clearSweepPreview(previewLayer) {
+    // 清除所有预览元素
+    previewLayer.removeAll(true);
+    this.tweens.killTweensOf(previewLayer.getAll());
+  }
+  
+  getSweepPositions(x, y, direction) {
+    // 获取指定方向上将要被清除的所有位置
+    const positions = [];
+    
+    if (direction === 'horizontal') {
+      for (let i = 0; i < this.size; i++) {
+        positions.push({ x: i, y });
+      }
+    } else if (direction === 'vertical') {
+      for (let i = 0; i < this.size; i++) {
+        positions.push({ x, y: i });
+      }
+    } else if (direction === 'diagonal1') {
+      const offset = y - x;
+      for (let i = 0; i < this.size; i++) {
+        const ty = i + offset;
+        if (ty >= 0 && ty < this.size) {
+          positions.push({ x: i, y: ty });
+        }
+      }
+    } else if (direction === 'diagonal2') {
+      const sum = x + y;
+      for (let i = 0; i < this.size; i++) {
+        const ty = sum - i;
+        if (ty >= 0 && ty < this.size) {
+          positions.push({ x: i, y: ty });
+        }
+      }
+    }
+    
+    return positions;
+  }
+  
+  executeSweep(x, y, direction) {
+    // 获取要清除的位置
+    const positions = this.getSweepPositions(x, y, direction);
+    
+    // 清除棋子
+    positions.forEach(pos => {
+      if (!this.board.isDestroyed(pos.x, pos.y)) {
+        this.board.grid[pos.y][pos.x] = 0;
+      }
+    });
+    
+    // 清除对应的水滴
+    this.waterDrops = this.waterDrops.filter(drop => {
+      return !positions.some(pos => pos.x === drop.x && pos.y === drop.y);
+    });
+    
+    // 播放清扫特效
+    this.playSweepEffect(positions, direction);
+    
+    // 重绘并结束回合
+    this.redrawStones();
+    this.endTurn(false);
+    this.refreshUIState('');
+  }
+  
+  playSweepEffect(positions, direction) {
+    // 播放音效
+    this.playSkillSound('sweep');
+    
+    // 按位置顺序依次播放清扫效果
+    positions.forEach((pos, i) => {
+      setTimeout(() => {
+        const p = this.boardToWorld(pos.x, pos.y);
+        
+        // 扫帚/清洁特效
+        for (let j = 0; j < 12; j++) {
+          const angle = Math.random() * Math.PI * 2;
+          const dist = Math.random() * 30 + 20;
+          const particle = this.add.circle(p.x, p.y, 3, 0x4facfe, 1);
+          this.effectsLayer.add(particle);
+          
+          this.tweens.add({
+            targets: particle,
+            x: p.x + Math.cos(angle) * dist,
+            y: p.y + Math.sin(angle) * dist,
+            alpha: 0,
+            scale: 0.3,
+            duration: 400,
+            ease: 'Quad.easeOut',
+            onComplete: () => particle.destroy(),
+          });
+        }
+        
+        // 波纹效果
+        const wave = this.add.circle(p.x, p.y, 5, 0x4facfe, 0.6);
+        wave.setStrokeStyle(2, 0xffffff, 0.8);
+        this.effectsLayer.add(wave);
+        
+        this.tweens.add({
+          targets: wave,
+          scale: 4,
+          alpha: 0,
+          duration: 500,
+          ease: 'Quad.easeOut',
+          onComplete: () => wave.destroy(),
+        });
+      }, i * 30);
+    });
   }
 
   restartGame() {

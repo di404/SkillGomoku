@@ -36,6 +36,7 @@ const domSkills = {
   'tiger-trap': document.getElementById('skill-tiger'),
   'water-drop': document.getElementById('skill-drop'),
   'resurrection': document.getElementById('skill-resurrection'),
+  'clean-sweep': document.getElementById('skill-clean'),
 };
 
 function setToast(msg) {

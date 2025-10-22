@@ -134,6 +134,15 @@ export default class SkillsManager {
           ctx.flags.awaitingRepair = true; // 等待点击被破坏的格子进行修复
         },
       }),
+      new Skill({
+        id: 'clean-sweep',
+        name: '保洁上门',
+        description: '清除棋盘上的一整行/列/对角线。',
+        cooldown: 7,
+        use: async (ctx) => {
+          ctx.flags.awaitingCleanSweep = true; // 等待选择清扫方向
+        },
+      }),
     ];
   }
 
