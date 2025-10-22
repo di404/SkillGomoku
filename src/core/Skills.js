@@ -24,7 +24,7 @@ export default class SkillsManager {
     this.scene = scene;
     this.board = board;
 
-    // 定义四种新技能
+    // 定义技能
     this.skills = [
       new Skill({
         id: 'flying-sand',
@@ -66,23 +66,10 @@ export default class SkillsManager {
       new Skill({
         id: 'mountain-power',
         name: '力拔山兮',
-        description: '移除对方任意两颗棋子。',
-        cooldown: 5,
+        description: '永久破坏一个格子（含棋子）。',
+        cooldown: 6,
         use: async (ctx) => {
-          // 检查对方是否有至少两颗棋子
-          const opponent = ctx.currentPlayer === 1 ? 2 : 1;
-          let count = 0;
-          for (let y = 0; y < this.board.size; y++) {
-            for (let x = 0; x < this.board.size; x++) {
-              if (this.board.grid[y][x] === opponent) count++;
-              if (count >= 2) break;
-            }
-            if (count >= 2) break;
-          }
-          if (count < 2) {
-            return { ok: false, message: '对方棋子不足两颗' };
-          }
-          ctx.flags.awaitingRemovalCount = 2; // 需要点击两次对方棋子
+          ctx.flags.awaitingDestroy = true; // 等待点击格子进行破坏
         },
       }),
       new Skill({
@@ -111,6 +98,40 @@ export default class SkillsManager {
             }
           }
           ctx.redrawStones();
+        },
+      }),
+      new Skill({
+        id: 'tiger-trap',
+        name: '调虎离山',
+        description: '强制对方下一步必须在边缘落子。',
+        cooldown: 5,
+        use: async (ctx) => {
+          const nextPlayer = ctx.currentPlayer === 1 ? 2 : 1;
+          if (!ctx.forceBorder) ctx.forceBorder = {};
+          ctx.forceBorder[nextPlayer] = true;
+        },
+      }),
+      new Skill({
+        id: 'water-drop',
+        name: '水滴石穿',
+        description: '选择两个点虚落子，四回合后成为实体。',
+        cooldown: 8,
+        use: async (ctx) => {
+          ctx.flags.awaitingWaterDropCount = 2; // 等待选择两个点
+          if (!ctx.waterDrops) ctx.waterDrops = [];
+        },
+      }),
+      new Skill({
+        id: 'resurrection',
+        name: '东山再起',
+        description: '修复棋盘上被破坏的格子。',
+        cooldown: 7,
+        use: async (ctx) => {
+          // 检查是否有被破坏的格子
+          if (this.board.destroyed.size === 0) {
+            return { ok: false, message: '没有被破坏的格子' };
+          }
+          ctx.flags.awaitingRepair = true; // 等待点击被破坏的格子进行修复
         },
       }),
     ];

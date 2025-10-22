@@ -14,6 +14,8 @@ export default class GameScene extends Phaser.Scene {
 
     this.flags = {}; // 用于技能的临时标志位
     this.skipNextTurn = {}; // 用于"静如止水"技能跳过回合
+    this.forceBorder = {}; // 用于"调虎离山"强制边缘落子
+    this.waterDrops = []; // 水滴石穿的虚落子：{ x, y, player, turnsLeft }
   }
 
   create() {
@@ -99,7 +101,27 @@ export default class GameScene extends Phaser.Scene {
     for (let y = 0; y < this.size; y++) {
       for (let x = 0; x < this.size; x++) {
         const v = this.board.grid[y][x];
+        
+        // 绘制被破坏的格子
+        if (this.board.isDestroyed(x, y)) {
+          const p = this.boardToWorld(x, y);
+          const g = this.add.graphics();
+          g.fillStyle(0x1a1a1a, 1);
+          g.fillRect(p.x - this.cell * 0.4, p.y - this.cell * 0.4, this.cell * 0.8, this.cell * 0.8);
+          g.lineStyle(3, 0x8b0000, 1);
+          g.strokeRect(p.x - this.cell * 0.4, p.y - this.cell * 0.4, this.cell * 0.8, this.cell * 0.8);
+          // 绘制X标记
+          g.lineStyle(2, 0xff0000, 0.8);
+          g.lineBetween(p.x - this.cell * 0.3, p.y - this.cell * 0.3, p.x + this.cell * 0.3, p.y + this.cell * 0.3);
+          g.lineBetween(p.x + this.cell * 0.3, p.y - this.cell * 0.3, p.x - this.cell * 0.3, p.y + this.cell * 0.3);
+          this.stonesLayer.add(g);
+          continue;
+        }
+        
+        // 绘制实体棋子
         if (v !== 0) this.drawStone(x, y, v);
+        
+        // 绘制封禁格
         if (this.board.blocked.has(`${x},${y}`) && this.board.grid[y][x] === 0) {
           const p = this.boardToWorld(x, y);
           const g = this.add.graphics();
@@ -108,6 +130,35 @@ export default class GameScene extends Phaser.Scene {
           this.stonesLayer.add(g);
         }
       }
+    }
+    
+    // 绘制水滴（虚落子）
+    for (const drop of this.waterDrops) {
+      const p = this.boardToWorld(drop.x, drop.y);
+      const g = this.add.graphics();
+      // 黑棋：深灰色，白棋：浅灰色，更明显的区分
+      const color = drop.player === 1 ? 0x333333 : 0xeeeeee;
+      const borderColor = drop.player === 1 ? 0x111111 : 0xffffff;
+      const alpha = 0.4 + (4 - drop.turnsLeft) * 0.15; // 越接近成熟越实
+      g.fillStyle(color, alpha);
+      g.fillCircle(p.x, p.y, this.cell * 0.32);
+      g.lineStyle(3, borderColor, alpha + 0.2);
+      g.strokeCircle(p.x, p.y, this.cell * 0.32);
+      // 水滴特征：蓝色外圈
+      g.lineStyle(1, 0x4facfe, 0.6);
+      g.strokeCircle(p.x, p.y, this.cell * 0.36);
+      
+      // 显示剩余回合数
+      const text = this.add.text(p.x, p.y, String(drop.turnsLeft), {
+        fontSize: '18px',
+        fontWeight: 'bold',
+        color: drop.player === 1 ? '#ffffff' : '#000000',
+        stroke: drop.player === 1 ? '#000000' : '#ffffff',
+        strokeThickness: 2,
+        align: 'center',
+      }).setOrigin(0.5);
+      this.stonesLayer.add(g);
+      this.stonesLayer.add(text);
     }
   }
 
@@ -127,26 +178,69 @@ export default class GameScene extends Phaser.Scene {
     const { x, y } = this.worldToBoard(pointer.x, pointer.y);
     if (!this.board.inBounds(x, y)) return;
 
-    // 技能：力拔山兮 - 等待移除两颗对方棋子
-    if (this.flags.awaitingRemovalCount && this.flags.awaitingRemovalCount > 0) {
-      const target = this.board.grid[y][x];
-      if (target !== 0 && target !== this.currentPlayer) {
-        // 播放移除特效
-        this.playRemovalEffect(x, y);
-        this.board.remove(x, y);
-        this.flags.awaitingRemovalCount -= 1;
+    // 技能：力拔山兮 - 等待点击格子破坏
+    if (this.flags.awaitingDestroy) {
+      if (!this.board.isDestroyed(x, y)) {
+        this.playDestroyEffect(x, y);
+        this.board.destroy(x, y);
+        this.flags.awaitingDestroy = false;
         this.redrawStones();
-        if (this.flags.awaitingRemovalCount === 0) {
-          delete this.flags.awaitingRemovalCount;
-          this.endTurn(false); // 技能不计入正常落子
+        this.endTurn(false);
+        this.refreshUIState('');
+      }
+      return;
+    }
+
+    // 技能：东山再起 - 等待点击被破坏的格子修复
+    if (this.flags.awaitingRepair) {
+      if (this.board.isDestroyed(x, y)) {
+        this.playRepairEffect(x, y);
+        this.board.repair(x, y);
+        this.flags.awaitingRepair = false;
+        this.redrawStones();
+        this.endTurn(false);
+        this.refreshUIState('');
+      }
+      return;
+    }
+
+    // 技能：水滴石穿 - 等待选择两个点虚落子
+    if (this.flags.awaitingWaterDropCount && this.flags.awaitingWaterDropCount > 0) {
+      if (this.board.isEmpty(x, y)) {
+        // 添加水滴（4回合后成熟，因为对方落2子需要2回合，交替落子共4回合）
+        this.waterDrops.push({ x, y, player: this.currentPlayer, turnsLeft: 4 });
+        this.flags.awaitingWaterDropCount -= 1;
+        this.redrawStones();
+        
+        if (this.flags.awaitingWaterDropCount === 0) {
+          // 选择完两个水滴位置，结束技能使用，切换回合
+          delete this.flags.awaitingWaterDropCount;
+          //this.endTurn(true); // 技能使用完毕，正常推进回合
+          this.refreshUIState('');
+        } else {
+          // 还需要选择更多水滴位置，不切换玩家
+          this.refreshUIState(`还需选择 ${this.flags.awaitingWaterDropCount} 个水滴位置`);
         }
-        this.refreshUIState(this.flags.awaitingRemovalCount > 0 ? `还需移除 ${this.flags.awaitingRemovalCount} 颗对方棋子` : '');
       }
       return;
     }
 
     // 正常落子
     if (!this.board.isEmpty(x, y)) return;
+
+    // 检查是否被强制边缘落子
+    if (this.forceBorder[this.currentPlayer]) {
+      const isBorder = x === 0 || x === this.size - 1 || y === 0 || y === this.size - 1;
+      if (!isBorder) {
+        this.refreshUIState('你必须在边缘落子！');
+        return;
+      }
+      // 成功在边缘落子，清除强制边缘标记
+      delete this.forceBorder[this.currentPlayer];
+    }
+
+    // 检查是否打断水滴（在落子之前）
+    this.checkWaterDropInterrupt(x, y);
 
     if (this.placeAndCheck(x, y)) return; // 胜负已分
 
@@ -176,6 +270,10 @@ export default class GameScene extends Phaser.Scene {
     if (advanceTurn) this.turn += 1;
     // 回合结束，冷却推进
     this.skills.tickAll();
+    
+    // 更新水滴进度
+    this.updateWaterDrops();
+    
     // 切换玩家
     this.currentPlayer = this.currentPlayer === 1 ? 2 : 1;
     
@@ -189,6 +287,41 @@ export default class GameScene extends Phaser.Scene {
     }
     
     this.refreshUIState();
+  }
+
+  updateWaterDrops() {
+    // 每回合更新水滴进度
+    for (let i = this.waterDrops.length - 1; i >= 0; i--) {
+      const drop = this.waterDrops[i];
+      drop.turnsLeft -= 1;
+      
+      if (drop.turnsLeft <= 0) {
+        // 水滴成熟，变成实体棋子
+        if (this.board.isEmpty(drop.x, drop.y)) {
+          this.board.place(drop.x, drop.y, drop.player);
+          this.playWaterDropMatureEffect(drop.x, drop.y);
+          
+          // 检查是否获胜
+          if (checkWin(this.board.grid, drop.x, drop.y, drop.player)) {
+            this.onWin(drop.player);
+          }
+        }
+        this.waterDrops.splice(i, 1);
+      }
+    }
+    this.redrawStones();
+  }
+
+  checkWaterDropInterrupt(x, y) {
+    // 检查是否有水滴在此位置，如果有则只打断这一个位置的水滴
+    for (let i = this.waterDrops.length - 1; i >= 0; i--) {
+      const drop = this.waterDrops[i];
+      if (drop.x === x && drop.y === y) {
+        this.waterDrops.splice(i, 1);
+        this.refreshUIState('打断了对方的水滴石穿！');
+        break; // 只打断这一个位置，不影响其他水滴
+      }
+    }
   }
 
   refreshUIState(message) {
@@ -216,6 +349,9 @@ export default class GameScene extends Phaser.Scene {
       'mountain-power': () => this.effectMountainPower(),
       'still-water': () => this.effectStillWater(),
       'polarity-reverse': () => this.effectPolarityReverse(),
+      'tiger-trap': () => this.effectTigerTrap(),
+      'water-drop': () => this.effectWaterDrop(),
+      'resurrection': () => this.effectResurrection(),
     };
     const fn = effects[skillId];
     if (fn) fn();
@@ -238,6 +374,9 @@ export default class GameScene extends Phaser.Scene {
       'mountain-power': { freq: 100, type: 'square', duration: 0.5 },
       'still-water': { freq: 600, type: 'sine', duration: 0.4 },
       'polarity-reverse': { freq: 400, type: 'triangle', duration: 0.6 },
+      'tiger-trap': { freq: 200, type: 'sawtooth', duration: 0.4 },
+      'water-drop': { freq: 800, type: 'sine', duration: 0.5 },
+      'resurrection': { freq: 500, type: 'triangle', duration: 0.6 },
     };
     
     const sound = sounds[skillId] || { freq: 440, type: 'sine', duration: 0.3 };
@@ -258,6 +397,9 @@ export default class GameScene extends Phaser.Scene {
       'mountain-power': '力拔山兮',
       'still-water': '静如止水',
       'polarity-reverse': '两极反转',
+      'tiger-trap': '调虎离山',
+      'water-drop': '水滴石穿',
+      'resurrection': '东山再起',
     };
     
     const name = names[skillId];
@@ -383,38 +525,165 @@ export default class GameScene extends Phaser.Scene {
     this.cameras.main.flash(400, 255, 255, 255);
   }
 
-  playRemovalEffect(x, y) {
-    // 力拔山兮移除棋子时的爆裂特效
+  effectTigerTrap() {
+    // 调虎离山：边缘红光闪烁
+    const sizePx = (this.size - 1) * this.cell;
+    const originX = this.origin.x;
+    const originY = this.origin.y;
+    
+    // 四条边框闪烁
+    const border = this.add.graphics();
+    border.lineStyle(4, 0xff6b6b, 0.8);
+    border.strokeRect(originX - 5, originY - 5, sizePx + 10, sizePx + 10);
+    this.effectsLayer.add(border);
+    
+    this.tweens.add({
+      targets: border,
+      alpha: 0,
+      duration: 800,
+      ease: 'Sine.easeInOut',
+      yoyo: true,
+      repeat: 1,
+      onComplete: () => border.destroy(),
+    });
+  }
+
+  effectWaterDrop() {
+    // 水滴石穿：蓝色水滴从上落下
+    const cx = this.scale.width / 2;
+    
+    for (let i = 0; i < 6; i++) {
+      const drop = this.add.circle(cx + (i - 2.5) * 40, -20, 6, 0x4facfe, 0.8);
+      this.effectsLayer.add(drop);
+      this.tweens.add({
+        targets: drop,
+        y: this.scale.height + 20,
+        alpha: 0,
+        duration: 1000,
+        delay: i * 100,
+        ease: 'Cubic.easeIn',
+        onComplete: () => drop.destroy(),
+      });
+    }
+  }
+
+  effectResurrection() {
+    // 东山再起：金色光芒从下升起
+    const cx = this.scale.width / 2;
+    const cy = this.scale.height / 2;
+    
+    // 上升的金色粒子
+    for (let i = 0; i < 30; i++) {
+      const x = cx + (Math.random() - 0.5) * 300;
+      const particle = this.add.circle(x, this.scale.height + 20, 4 + Math.random() * 3, 0xffd700, 0.9);
+      this.effectsLayer.add(particle);
+      this.tweens.add({
+        targets: particle,
+        y: cy - 100 - Math.random() * 100,
+        alpha: 0,
+        duration: 1000 + Math.random() * 500,
+        delay: i * 30,
+        ease: 'Sine.easeOut',
+        onComplete: () => particle.destroy(),
+      });
+    }
+  }
+
+  playDestroyEffect(x, y) {
+    // 力拔山兮破坏格子的特效
     const p = this.boardToWorld(x, y);
     
     // 爆裂粒子
-    for (let i = 0; i < 12; i++) {
-      const angle = (Math.PI * 2 * i) / 12;
-      const dist = 30 + Math.random() * 20;
-      const particle = this.add.circle(p.x, p.y, 3 + Math.random() * 3, 0xff4444, 1);
+    for (let i = 0; i < 16; i++) {
+      const angle = (Math.PI * 2 * i) / 16;
+      const dist = 40 + Math.random() * 30;
+      const particle = this.add.circle(p.x, p.y, 4 + Math.random() * 4, 0x8b0000, 1);
       this.effectsLayer.add(particle);
       this.tweens.add({
         targets: particle,
         x: p.x + Math.cos(angle) * dist,
         y: p.y + Math.sin(angle) * dist,
         alpha: 0,
-        duration: 300 + Math.random() * 200,
+        duration: 400 + Math.random() * 200,
         ease: 'Cubic.easeOut',
         onComplete: () => particle.destroy(),
       });
     }
     
-    // 中心冲击波
-    const shock = this.add.circle(p.x, p.y, 5, 0xff6b6b, 0.8);
-    this.effectsLayer.add(shock);
+    // 破碎冲击波
+    for (let i = 0; i < 3; i++) {
+      const shock = this.add.circle(p.x, p.y, 5, 0xff0000, 0.8);
+      this.effectsLayer.add(shock);
+      this.tweens.add({
+        targets: shock,
+        radius: 50 + i * 10,
+        alpha: 0,
+        duration: 400,
+        delay: i * 100,
+        ease: 'Cubic.easeOut',
+        onComplete: () => shock.destroy(),
+      });
+    }
+    
+    // 屏幕震动
+    this.cameras.main.shake(200, 0.003);
+  }
+
+  playRepairEffect(x, y) {
+    // 东山再起修复格子的特效
+    const p = this.boardToWorld(x, y);
+    
+    // 金色光芒粒子从外向内聚集
+    for (let i = 0; i < 20; i++) {
+      const angle = (Math.PI * 2 * i) / 20;
+      const dist = 60;
+      const startX = p.x + Math.cos(angle) * dist;
+      const startY = p.y + Math.sin(angle) * dist;
+      const particle = this.add.circle(startX, startY, 3, 0xffd700, 1);
+      this.effectsLayer.add(particle);
+      this.tweens.add({
+        targets: particle,
+        x: p.x,
+        y: p.y,
+        alpha: 0,
+        duration: 600,
+        ease: 'Cubic.easeIn',
+        onComplete: () => particle.destroy(),
+      });
+    }
+    
+    // 修复光环
+    const ring = this.add.circle(p.x, p.y, 5, 0xffd700, 0);
+    ring.setStrokeStyle(3, 0xffd700, 1);
+    this.effectsLayer.add(ring);
     this.tweens.add({
-      targets: shock,
+      targets: ring,
       radius: 40,
       alpha: 0,
-      duration: 300,
-      ease: 'Cubic.easeOut',
-      onComplete: () => shock.destroy(),
+      duration: 600,
+      ease: 'Sine.easeOut',
+      onComplete: () => ring.destroy(),
     });
+  }
+
+  playWaterDropMatureEffect(x, y) {
+    // 水滴成熟变成实体棋子的特效
+    const p = this.boardToWorld(x, y);
+    
+    // 水波纹扩散
+    for (let i = 0; i < 3; i++) {
+      const wave = this.add.circle(p.x, p.y, 10, 0x4facfe, 0.6);
+      this.effectsLayer.add(wave);
+      this.tweens.add({
+        targets: wave,
+        radius: 35 + i * 10,
+        alpha: 0,
+        duration: 500,
+        delay: i * 100,
+        ease: 'Sine.easeOut',
+        onComplete: () => wave.destroy(),
+      });
+    }
   }
 
   playWinEffect(player) {
@@ -527,6 +796,8 @@ export default class GameScene extends Phaser.Scene {
     this.turn = 1;
     this.flags = {};
     this.skipNextTurn = {};
+    this.forceBorder = {};
+    this.waterDrops = [];
     this.input.enabled = true;
     
     // 清空特效层

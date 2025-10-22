@@ -33,6 +33,9 @@ const domSkills = {
   'mountain-power': document.getElementById('skill-mountain'),
   'still-water': document.getElementById('skill-water'),
   'polarity-reverse': document.getElementById('skill-polarity'),
+  'tiger-trap': document.getElementById('skill-tiger'),
+  'water-drop': document.getElementById('skill-drop'),
+  'resurrection': document.getElementById('skill-resurrection'),
 };
 
 function setToast(msg) {
