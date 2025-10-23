@@ -32,6 +32,7 @@ let currentVersion = 0;
 const statusEl = document.getElementById('status');
 const currPlayerEl = document.getElementById('currPlayer');
 const turnEl = document.getElementById('turn');
+const yourRoleEl = document.getElementById('your-role');
 const toastEl = document.getElementById('toast');
 const onlineStatusEl = document.getElementById('online-status');
 const onlineRoleEl = document.getElementById('online-role');
@@ -68,6 +69,17 @@ function updateSidebar(state) {
   const { turn, currentPlayer, skills, message } = state;
   if (turnEl) turnEl.textContent = String(turn);
   if (currPlayerEl) currPlayerEl.textContent = currentPlayer === 1 ? '● 黑' : '○ 白';
+
+  // 更新"你是"标签：显示本地玩家身份
+  if (yourRoleEl) {
+    if (myPlayer === 1) {
+      yourRoleEl.textContent = '● 黑棋';
+    } else if (myPlayer === 2) {
+      yourRoleEl.textContent = '○ 白棋';
+    } else {
+      yourRoleEl.textContent = '-';
+    }
+  }
 
   // 更新技能按钮
   if (skills && Array.isArray(skills)) {
@@ -140,9 +152,18 @@ async function ensureOnline() {
   if (!res.ok) { setOnlineStatus(res.message || '联机不可用'); return false; }
   online.onStatus(setOnlineStatus);
   online.onState(({ version, state }) => {
+    console.log('[onState 接收]', { version, currentVersion, myPlayer, currentPlayer: state?.currentPlayer });
+    
     currentVersion = version || 0;
+    
     const gs = game.scene.getScene('GameScene');
-    if (gs && state) gs.loadState(state);
+    if (gs && state) {
+      // 确保在 loadState 前设置玩家身份
+      if (myPlayer && !gs.myPlayer) {
+        gs.myPlayer = myPlayer;
+      }
+      gs.loadState(state);
+    }
   });
   return true;
 }
@@ -154,6 +175,7 @@ btnCreateRoom?.addEventListener('click', async () => {
   const res = await online.createRoom(initial);
   if (res.ok) {
     myPlayer = res.player;
+    if (gs) gs.myPlayer = myPlayer; // 设置场景的玩家身份
     setOnlineRole(myPlayer);
     roomInputEl && (roomInputEl.value = res.roomId);
   } else setOnlineStatus(res.message || '创建失败');
@@ -163,8 +185,15 @@ btnJoinRoom?.addEventListener('click', async () => {
   if (!(await ensureOnline())) return;
   const roomId = (roomInputEl?.value || '').trim();
   if (!roomId) { setOnlineStatus('请输入房间ID'); return; }
+  
+  const gs = game.scene.getScene('GameScene');
   const res = await online.joinRoom(roomId);
-  if (res.ok) { myPlayer = res.player; setOnlineRole(myPlayer); }
+  if (res.ok) { 
+    // 关键：必须在这里立即设置，因为 joinRoom 内部已经开始监听了
+    myPlayer = res.player;
+    if (gs) gs.myPlayer = myPlayer;
+    setOnlineRole(myPlayer); 
+  }
   else setOnlineStatus(res.message || '加入失败');
 });
 
@@ -178,6 +207,8 @@ btnCopyLink?.addEventListener('click', async () => {
 btnLeave?.addEventListener('click', () => {
   online?.leaveRoom();
   myPlayer = null; currentVersion = 0;
+  const gs = game.scene.getScene('GameScene');
+  if (gs) gs.myPlayer = null; // 清除玩家身份
   setOnlineRole(null); setOnlineStatus('未连接');
 });
 
@@ -190,29 +221,48 @@ game.events.on('ready', async () => {
     if (await ensureOnline()) {
       roomInputEl && (roomInputEl.value = room);
       const res = await online.joinRoom(room);
-      if (res.ok) { myPlayer = res.player; setOnlineRole(myPlayer); }
+      if (res.ok) { 
+        myPlayer = res.player; 
+        const gs = game.scene.getScene('GameScene');
+        if (gs) gs.myPlayer = myPlayer; // 设置场景的玩家身份
+        setOnlineRole(myPlayer); 
+      }
     }
   }
 });
 
-function tryPublishState(state) {
+function tryPublishState(payload) {
   if (!online || !online.getRoomId()) return;
-  // 仅由当前回合的玩家发布状态
-  if (myPlayer && state.currentPlayer !== myPlayer) return;
-  online.publishState(state, currentVersion).then((res) => {
-    if (!res.ok) {
-      // 版本冲突或其他失败，忽略，让快照同步覆盖
-    }
+  if (!myPlayer) return;
+  
+  const { state, operator } = payload;
+  
+  console.log('[tryPublishState]', {
+    myPlayer,
+    operator,
+    currentPlayer: state.currentPlayer,
+    willPublish: operator === myPlayer
   });
+  
+  // 只有发起操作的客户端才发布状态
+  if (operator === myPlayer) {
+    online.publishState(state, currentVersion).then((res) => {
+      if (!res.ok) {
+        console.warn('发布状态失败:', res.message);
+      } else {
+        console.log('[发布状态成功]', { version: currentVersion + 1 });
+      }
+    });
+  }
 }
 
 const gs = game.scene.getScene('GameScene');
 game.events.on('sceneawake', () => {});
 // 监听状态变化
-game.scene.getScene('GameScene')?.events.on('state-changed', (state) => tryPublishState(state));
+game.scene.getScene('GameScene')?.events.on('state-changed', (payload) => tryPublishState(payload));
 
 // Fallback: 若上面行在场景尚未创建时未绑定，则延迟绑定
 setTimeout(() => {
   const g = game.scene.getScene('GameScene');
-  g?.events.on('state-changed', (state) => tryPublishState(state));
+  g?.events.on('state-changed', (payload) => tryPublishState(payload));
 }, 600);

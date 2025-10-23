@@ -6,16 +6,20 @@ class Skill {
     this.name = name;
     this.description = description;
     this.cooldown = cooldown; // turns
-    this.remaining = 0; // turns remaining on cooldown
+    this.remaining = { 1: 0, 2: 0 }; // 分别记录玩家1和玩家2的CD
     this.use = use; // async or sync function(ctx)
   }
 
-  canUse() {
-    return this.remaining <= 0;
+  canUse(player) {
+    return this.remaining[player] <= 0;
   }
 
-  tick() {
-    if (this.remaining > 0) this.remaining -= 1;
+  tick(player) {
+    if (this.remaining[player] > 0) this.remaining[player] -= 1;
+  }
+  
+  startCooldown(player) {
+    this.remaining[player] = this.cooldown;
   }
 }
 
@@ -154,14 +158,16 @@ export default class SkillsManager {
     return this.skills.find(s => s.id === id);
   }
 
-  tickAll() {
-    this.skills.forEach(s => s.tick());
+  tickAll(player) {
+    this.skills.forEach(s => s.tick(player));
   }
 
   // ——— 序列化/反序列化 冷却时间 ———
   getCooldowns() {
     const out = {};
-    for (const s of this.skills) out[s.id] = s.remaining || 0;
+    for (const s of this.skills) {
+      out[s.id] = { 1: s.remaining[1] || 0, 2: s.remaining[2] || 0 };
+    }
     return out;
   }
 
@@ -170,7 +176,13 @@ export default class SkillsManager {
     for (const s of this.skills) {
       if (Object.prototype.hasOwnProperty.call(map, s.id)) {
         const v = map[s.id];
-        s.remaining = typeof v === 'number' ? v : 0;
+        if (typeof v === 'object' && v !== null) {
+          // 新格式：{ 1: cd1, 2: cd2 }
+          s.remaining = { 1: v[1] || 0, 2: v[2] || 0 };
+        } else if (typeof v === 'number') {
+          // 旧格式兼容：单一数字，应用到两个玩家
+          s.remaining = { 1: v, 2: v };
+        }
       }
     }
   }
@@ -178,13 +190,14 @@ export default class SkillsManager {
   async activate(id, ctx) {
     const s = this.getById(id);
     if (!s) return { ok: false, message: '技能不存在' };
-    if (!s.canUse()) return { ok: false, message: '冷却中' };
+    const player = ctx.currentPlayer;
+    if (!s.canUse(player)) return { ok: false, message: '冷却中' };
 
     const result = await s.use(ctx);
     // 如果技能返回了失败结果，不触发冷却
     if (result && !result.ok) return result;
     
-    s.remaining = s.cooldown;
+    s.startCooldown(player);
     return { ok: true };
   }
 }

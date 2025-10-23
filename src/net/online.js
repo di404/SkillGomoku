@@ -90,8 +90,9 @@ export default class OnlineService {
     this.roomId = id;
     this.roomRef = ref;
     this.player = assigned;
-    this._listen();
     this._emitStatus(`已加入房间 ${id}`);
+    // 延迟一点再开始监听，让外部有机会设置状态
+    setTimeout(() => this._listen(), 50);
     return { ok: true, roomId: id, player: assigned };
   }
 

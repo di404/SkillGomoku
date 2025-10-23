@@ -11,6 +11,8 @@ export default class GameScene extends Phaser.Scene {
 
     this.currentPlayer = 1; // 1 black, 2 white
     this.turn = 1;
+    
+    this.myPlayer = null; // 联机模式下，本地玩家的身份（1或2），单机模式为null
 
     this.flags = {}; // 用于技能的临时标志位
     this.skipNextTurn = {}; // 用于"静如止水"技能跳过回合
@@ -39,6 +41,11 @@ export default class GameScene extends Phaser.Scene {
 
     // 与 UI/联机 通信
     this.events.on('use-skill', async (id) => {
+      // 联机模式下，只有当前回合玩家才能使用技能
+      if (!this.canOperate()) {
+        this.game.events.emit('ui-feedback', { ok: false, message: '还没轮到你！' });
+        return;
+      }
       const res = await this.skills.activate(id, this);
       if (res.ok) {
         this.playSkillEffect(id); // 播放技能特效
@@ -50,6 +57,14 @@ export default class GameScene extends Phaser.Scene {
     });
 
     this.refreshUIState();
+  }
+  
+  // 检查当前本地玩家是否可以操作
+  canOperate() {
+    // 单机模式（myPlayer为null）：总是可以操作
+    if (this.myPlayer == null) return true;
+    // 联机模式：只有当前回合的玩家可以操作
+    return this.currentPlayer === this.myPlayer;
   }
 
   drawBoard() {
@@ -179,6 +194,9 @@ export default class GameScene extends Phaser.Scene {
   handlePointerDown(pointer) {
     const { x, y } = this.worldToBoard(pointer.x, pointer.y);
     if (!this.board.inBounds(x, y)) return;
+    
+    // 联机模式下，只有当前回合玩家才能操作
+    if (!this.canOperate()) return;
 
     // 如果正在选择清扫方向，阻止其他操作
     if (this.flags.choosingCleanSweepDirection) {
@@ -285,8 +303,8 @@ export default class GameScene extends Phaser.Scene {
 
   endTurn(advanceTurn) {
     if (advanceTurn) this.turn += 1;
-    // 回合结束，冷却推进
-    this.skills.tickAll();
+    // 回合结束，当前玩家的技能冷却推进
+    this.skills.tickAll(this.currentPlayer);
     
     // 更新水滴进度
     this.updateWaterDrops();
@@ -374,8 +392,19 @@ export default class GameScene extends Phaser.Scene {
       this.forceBorder = state.forceBorder || {};
       this.waterDrops = Array.isArray(state.waterDrops) ? state.waterDrops.map(d => ({...d})) : [];
       if (state.skillsCooldowns) this.skills.setCooldowns(state.skillsCooldowns);
-      // 清理临时标记
-      this.flags = {};
+      
+      // 联机模式下，严格检查：只有轮到自己时才保留 flags，否则清空
+      if (this.myPlayer != null) {
+        // 联机模式
+        if (state.currentPlayer === this.myPlayer) {
+          // 轮到自己，保留 flags（技能等待状态）
+        } else {
+          // 不是自己的回合，强制清空 flags
+          this.flags = {};
+        }
+      }
+      // 单机模式不处理 flags
+      
       this.input.enabled = !state.gameOver;
       this.redrawStones();
       this.refreshUIState();
@@ -386,7 +415,11 @@ export default class GameScene extends Phaser.Scene {
 
   emitStateChanged() {
     if (this.suppressStateEvents) return;
-    this.events.emit('state-changed', this.toJSON());
+    // 发送状态和操作者信息
+    this.events.emit('state-changed', {
+      state: this.toJSON(),
+      operator: this.myPlayer // 当前客户端的玩家身份
+    });
   }
 
   checkWaterDropInterrupt(x, y) {
@@ -402,10 +435,17 @@ export default class GameScene extends Phaser.Scene {
   }
 
   refreshUIState(message) {
+    // 在联机模式下，显示本地玩家的技能CD；单机模式显示当前回合玩家的CD
+    const displayPlayer = this.myPlayer != null ? this.myPlayer : this.currentPlayer;
     const payload = {
       turn: this.turn,
       currentPlayer: this.currentPlayer,
-      skills: this.skills.list().map(s => ({ id: s.id, name: s.name, desc: s.description, cd: s.remaining })),
+      skills: this.skills.list().map(s => ({ 
+        id: s.id, 
+        name: s.name, 
+        desc: s.description, 
+        cd: s.remaining[displayPlayer] || 0 
+      })),
       flags: { ...this.flags },
       message,
     };

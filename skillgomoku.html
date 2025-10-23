@@ -137,6 +137,7 @@
           <div class="title">技能五子棋</div>
           <div class="muted">外练筋骨皮，内练五子棋</div>
           <!--<div class="status-line"><span>状态</span><span id="status">Loading…</span></div>-->
+          <div class="status-line"><span>你是</span><span id="your-role">-</span></div>
           <div class="status-line"><span>当前玩家</span><span id="currPlayer">-</span></div>
           <div class="status-line"><span>回合</span><span id="turn">-</span></div>
         </div>
@@ -183,10 +184,10 @@
             <input id="room-id-input" type="text" placeholder="房间ID (6位)" style="flex:1; padding:6px 8px; border-radius:6px; border:1px solid #333; background:#0f1220; color:#e8e8e8;" />
             <button id="create-room-btn" class="restart-btn" style="padding:6px 10px; font-size:14px; box-shadow:none; background:linear-gradient(135deg,#3b82f6,#6366f1)">创建</button>
             <button id="join-room-btn" class="restart-btn" style="padding:6px 10px; font-size:14px; box-shadow:none; background:linear-gradient(135deg,#10b981,#22c55e)">加入</button>
+            <button id="leave-room-btn" class="restart-btn" style="padding:6px 10px; font-size:14px; box-shadow:none; background:linear-gradient(135deg,#ef4444,#f97316)">离开</button>
           </div>
           <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
             <button id="copy-link-btn" class="restart-btn" style="padding:6px 10px; flex:1; font-size:14px; box-shadow:none; background:linear-gradient(135deg,#f59e0b,#f97316)">复制邀请链接</button>
-            <button id="leave-room-btn" class="restart-btn" style="padding:6px 10px; font-size:14px; box-shadow:none; background:linear-gradient(135deg,#ef4444,#f97316)">离开</button>
           </div>
           <div id="online-status" style="font-size:12px; color:#a3a3a3; min-height:20px;">未连接</div>
           <div id="online-role" style="font-size:14px; color:#ffd666; min-height:22px;"></div>
