@@ -37,11 +37,13 @@ export default class GameScene extends Phaser.Scene {
     // 输入事件
     this.input.on('pointerdown', this.handlePointerDown, this);
 
-    // 与 UI 场景通信
+    // 与 UI/联机 通信
     this.events.on('use-skill', async (id) => {
       const res = await this.skills.activate(id, this);
       if (res.ok) {
         this.playSkillEffect(id); // 播放技能特效
+        // 技能释放后立即同步一次（用于不结束回合的技能）
+        this.emitStateChanged && this.emitStateChanged();
       }
       this.game.events.emit('ui-feedback', res);
       this.refreshUIState();
@@ -224,6 +226,8 @@ export default class GameScene extends Phaser.Scene {
         this.waterDrops.push({ x, y, player: this.currentPlayer, turnsLeft: 4 });
         this.flags.awaitingWaterDropCount -= 1;
         this.redrawStones();
+        // 联机：中途同步一次
+        this.emitStateChanged && this.emitStateChanged();
         
         if (this.flags.awaitingWaterDropCount === 0) {
           // 选择完两个水滴位置，结束技能使用，切换回合
@@ -300,6 +304,8 @@ export default class GameScene extends Phaser.Scene {
     }
     
     this.refreshUIState();
+    // 回合结束，广播状态（联机）
+    this.emitStateChanged && this.emitStateChanged();
   }
 
   updateWaterDrops() {
@@ -323,6 +329,64 @@ export default class GameScene extends Phaser.Scene {
       }
     }
     this.redrawStones();
+  }
+
+  // ——— 状态导出/导入（联机用） ———
+  toJSON() {
+    const destroyed = Array.from(this.board.destroyed || []).map(k => {
+      const [x, y] = k.split(',').map(Number); return { x, y };
+    });
+    // Firestore 不支持嵌套数组，这里将棋盘每一行序列化为字符串（例如 "012001..."）
+    const gridRows = this.board.grid.map(row => row.join(''));
+    return {
+      size: this.size,
+      // 使用字符串数组而不是二维数组
+      grid: gridRows,
+      destroyed,
+      currentPlayer: this.currentPlayer,
+      turn: this.turn,
+      skipNextTurn: this.skipNextTurn,
+      forceBorder: this.forceBorder,
+      waterDrops: this.waterDrops.map(d => ({...d})),
+      skillsCooldowns: this.skills.getCooldowns(),
+      gameOver: !this.input.enabled,
+    };
+  }
+
+  loadState(state) {
+    if (!state) return;
+    this.suppressStateEvents = true;
+    try {
+      if (state.grid && Array.isArray(state.grid)) {
+        // 兼容两种格式：
+        // 1) 新格式：字符串数组，每个字符串表示一行，如 "01200"
+        // 2) 旧格式：二维数组 [[0,1,2,...], ...]
+        if (typeof state.grid[0] === 'string') {
+          this.board.grid = state.grid.map(line => line.split('').map(ch => Number(ch)));
+        } else if (Array.isArray(state.grid[0])) {
+          this.board.grid = state.grid.map(row => row.slice());
+        }
+      }
+      this.board.destroyed = new Set((state.destroyed || []).map(p => `${p.x},${p.y}`));
+      this.currentPlayer = state.currentPlayer || 1;
+      this.turn = state.turn || 1;
+      this.skipNextTurn = state.skipNextTurn || {};
+      this.forceBorder = state.forceBorder || {};
+      this.waterDrops = Array.isArray(state.waterDrops) ? state.waterDrops.map(d => ({...d})) : [];
+      if (state.skillsCooldowns) this.skills.setCooldowns(state.skillsCooldowns);
+      // 清理临时标记
+      this.flags = {};
+      this.input.enabled = !state.gameOver;
+      this.redrawStones();
+      this.refreshUIState();
+    } finally {
+      this.suppressStateEvents = false;
+    }
+  }
+
+  emitStateChanged() {
+    if (this.suppressStateEvents) return;
+    this.events.emit('state-changed', this.toJSON());
   }
 
   checkWaterDropInterrupt(x, y) {

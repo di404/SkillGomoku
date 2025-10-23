@@ -158,6 +158,23 @@ export default class SkillsManager {
     this.skills.forEach(s => s.tick());
   }
 
+  // ——— 序列化/反序列化 冷却时间 ———
+  getCooldowns() {
+    const out = {};
+    for (const s of this.skills) out[s.id] = s.remaining || 0;
+    return out;
+  }
+
+  setCooldowns(map) {
+    if (!map) return;
+    for (const s of this.skills) {
+      if (Object.prototype.hasOwnProperty.call(map, s.id)) {
+        const v = map[s.id];
+        s.remaining = typeof v === 'number' ? v : 0;
+      }
+    }
+  }
+
   async activate(id, ctx) {
     const s = this.getById(id);
     if (!s) return { ok: false, message: '技能不存在' };

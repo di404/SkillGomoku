@@ -177,6 +177,20 @@
             </div>
           </div>
         </div>
+        <div class="card" id="online-card">
+          <div class="title">联机对战</div>
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+            <input id="room-id-input" type="text" placeholder="房间ID (6位)" style="flex:1; padding:6px 8px; border-radius:6px; border:1px solid #333; background:#0f1220; color:#e8e8e8;" />
+            <button id="create-room-btn" class="restart-btn" style="padding:6px 10px; font-size:14px; box-shadow:none; background:linear-gradient(135deg,#3b82f6,#6366f1)">创建</button>
+            <button id="join-room-btn" class="restart-btn" style="padding:6px 10px; font-size:14px; box-shadow:none; background:linear-gradient(135deg,#10b981,#22c55e)">加入</button>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+            <button id="copy-link-btn" class="restart-btn" style="padding:6px 10px; flex:1; font-size:14px; box-shadow:none; background:linear-gradient(135deg,#f59e0b,#f97316)">复制邀请链接</button>
+            <button id="leave-room-btn" class="restart-btn" style="padding:6px 10px; font-size:14px; box-shadow:none; background:linear-gradient(135deg,#ef4444,#f97316)">离开</button>
+          </div>
+          <div id="online-status" style="font-size:12px; color:#a3a3a3; min-height:20px;">未连接</div>
+          <div id="online-role" style="font-size:14px; color:#ffd666; min-height:22px;"></div>
+        </div>
         <div class="card">
           <div class="title">提示</div>
           <div class="toast" id="toast"></div>
@@ -195,6 +209,8 @@
       </div>
     </div>
 
+  <!-- 可选：提供 Firebase 配置。将你的配置放到 assets/firebase-config.js 并定义 window.FIREBASE_CONFIG -->
+  <script src="assets/firebase-config.js"></script>
     <!-- 入口脚本（使用 ES Modules 组织代码） -->
     <script type="module" src="./src/main.js"></script>
   </body>
