@@ -1,0 +1,24 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 房间规则
+    match /rooms/{roomId} {
+      // 允许所有已认证用户读取房间
+      allow read: if request.auth != null;
+      
+      // 只允许创建者创建房间
+      allow create: if request.auth != null
+                    && request.resource.data.keys().hasAll(['createdAt', 'version', 'players', 'turn', 'state'])
+                    && request.resource.data.players['1'] == request.auth.uid;
+      
+      // 只允许房间内的玩家更新状态
+      allow update: if request.auth != null
+                    && (resource.data.players['1'] == request.auth.uid 
+                        || resource.data.players['2'] == request.auth.uid);
+      
+      // 不允许删除房间（可根据需要调整）
+      allow delete: if false;
+    }
+  }
+}
