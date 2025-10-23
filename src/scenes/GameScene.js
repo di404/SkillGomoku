@@ -49,8 +49,10 @@ export default class GameScene extends Phaser.Scene {
       const res = await this.skills.activate(id, this);
       if (res.ok) {
         this.playSkillEffect(id); // 播放技能特效
-        // 技能释放后立即同步一次（用于不结束回合的技能）
-        this.emitStateChanged && this.emitStateChanged();
+        // 力拔山兮、东山再起等需要等待用户点击目标格子，实际状态变更时再 emitStateChanged
+        if (id !== 'mountain-power' && id !== 'resurrection') {
+          this.emitStateChanged && this.emitStateChanged();
+        }
       }
       this.game.events.emit('ui-feedback', res);
       this.refreshUIState();
@@ -220,6 +222,8 @@ export default class GameScene extends Phaser.Scene {
         this.redrawStones();
         this.endTurn(false);
         this.refreshUIState('');
+        // 只在实际 destroy 后同步一次
+        this.emitStateChanged && this.emitStateChanged();
       }
       return;
     }
@@ -233,6 +237,8 @@ export default class GameScene extends Phaser.Scene {
         this.redrawStones();
         this.endTurn(false);
         this.refreshUIState('');
+        // 只在实际 repair 后同步一次
+        this.emitStateChanged && this.emitStateChanged();
       }
       return;
     }
@@ -244,16 +250,15 @@ export default class GameScene extends Phaser.Scene {
         this.waterDrops.push({ x, y, player: this.currentPlayer, turnsLeft: 4 });
         this.flags.awaitingWaterDropCount -= 1;
         this.redrawStones();
-        // 联机：中途同步一次
-        this.emitStateChanged && this.emitStateChanged();
         
         if (this.flags.awaitingWaterDropCount === 0) {
-          // 选择完两个水滴位置，结束技能使用，切换回合
+          // 选择完两个水滴位置，结束技能使用，只同步一次
           delete this.flags.awaitingWaterDropCount;
-          //this.endTurn(true); // 技能使用完毕，正常推进回合
           this.refreshUIState('');
+          // 只在选择完所有水滴后同步一次，避免快速点击时版本冲突
+          this.emitStateChanged && this.emitStateChanged();
         } else {
-          // 还需要选择更多水滴位置，不切换玩家
+          // 还需要选择更多水滴位置，不切换玩家，也不同步
           this.refreshUIState(`还需选择 ${this.flags.awaitingWaterDropCount} 个水滴位置`);
         }
       }

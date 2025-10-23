@@ -234,25 +234,65 @@ game.events.on('ready', async () => {
 function tryPublishState(payload) {
   if (!online || !online.getRoomId()) return;
   if (!myPlayer) return;
-  
+
   const { state, operator } = payload;
-  
+
   console.log('[tryPublishState]', {
     myPlayer,
     operator,
     currentPlayer: state.currentPlayer,
     willPublish: operator === myPlayer
   });
-  
-  // 只有发起操作的客户端才发布状态
-  if (operator === myPlayer) {
-    online.publishState(state, currentVersion).then((res) => {
-      if (!res.ok) {
-        console.warn('发布状态失败:', res.message);
+
+  // 自动重试机制，解决版本不匹配导致的本地操作丢失
+  async function publishWithRetry(state, version, retry = 0) {
+    if (retry > 3) {
+      console.warn('多次重试仍失败，放弃本地变更');
+      return;
+    }
+    const res = await online.publishState(state, version);
+    if (res.ok) {
+      console.log('[发布状态成功]', { version: version + 1 });
+    } else if (res.message && res.message.includes('版本不匹配')) {
+      // 拉取最新状态，合并本地操作后重试
+      const latest = await online.getRoomState();
+      if (latest && latest.state) {
+        console.log('[版本冲突，合并状态重试]', { oldVersion: version, newVersion: latest.version, retry });
+        // 合并 destroyed 状态（只合并 destroyed，其他操作可按需扩展）
+        const mergeDestroyed = (oldArr, newArr) => {
+          const set = new Set([...(oldArr||[]).map(p=>`${p.x},${p.y}`), ...(newArr||[]).map(p=>`${p.x},${p.y}`)]);
+          return Array.from(set).map(k => {
+            const [x, y] = k.split(',').map(Number);
+            return { x, y };
+          });
+        };
+        // 合并 waterDrops 状态（保留双方添加的水滴）
+        const mergeWaterDrops = (oldArr, newArr) => {
+          const map = new Map();
+          [...(oldArr||[]), ...(newArr||[])].forEach(drop => {
+            const key = `${drop.x},${drop.y}`;
+            if (!map.has(key) || map.get(key).turnsLeft > drop.turnsLeft) {
+              map.set(key, drop);
+            }
+          });
+          return Array.from(map.values());
+        };
+        const merged = {
+          ...latest.state,
+          destroyed: mergeDestroyed(latest.state.destroyed, state.destroyed),
+          waterDrops: mergeWaterDrops(latest.state.waterDrops, state.waterDrops)
+        };
+        await publishWithRetry(merged, latest.version, retry + 1);
       } else {
-        console.log('[发布状态成功]', { version: currentVersion + 1 });
+        console.warn('无法获取最新房间状态，重试失败');
       }
-    });
+    } else {
+      console.warn('发布状态失败:', res.message);
+    }
+  }
+
+  if (operator === myPlayer) {
+    publishWithRetry(state, currentVersion);
   }
 }
 

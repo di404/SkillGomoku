@@ -141,6 +141,23 @@ export default class OnlineService {
     }
   }
 
+  async getRoomState() {
+    if (!this.roomRef) return null;
+    try {
+      const snap = await getDoc(this.roomRef);
+      if (!snap.exists()) return null;
+      const data = snap.data();
+      return {
+        state: data.state || null,
+        version: data.version || 0,
+        turn: data.turn || 1,
+      };
+    } catch (e) {
+      console.warn('getRoomState failed:', e.message);
+      return null;
+    }
+  }
+
   getMyPlayer() { return this.player; }
   getRoomId() { return this.roomId; }
 }
